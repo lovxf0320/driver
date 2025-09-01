@@ -1,0 +1,44 @@
+/dts-v1/;   //第一行表示dts文件版本
+/{
+    model="This is my devicetree";
+    #address-cells=<1>;
+    #size-cells=<1>;
+
+    chosen{
+        bootargs="root=/dev/nfs rw nfsroot=192.168.1.1 console=ttyS0,115200";
+    };
+
+    cpu1:cpu@1{
+        device_type="cpu";
+        compatible="arm,cortex-a35","arm,armv8";
+        reg=<0x0 0x1>;
+    };
+
+    // aliases{
+    //     led1=&led;
+    // };
+
+    aliases{
+        led1="/gpio@22020101";
+    };
+
+    node1{
+        #address-cells=<1>;
+        #size-cells=<1>;
+        gpio@22020102{
+            reg=<0x22020102,0x40>;
+        };
+    };
+
+    node2{
+        node1-child{
+
+        };
+    };
+
+    led:gpio@22020101{
+        compatible="led";
+        reg=<0x20220101 0x40>;
+        status="okay";
+    };
+};

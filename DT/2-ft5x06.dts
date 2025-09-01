@@ -1,0 +1,17 @@
+/dts-v1/
+
+/include/ "my_device_tree_core.dts"
+/include/ "dt-bindings/pinctrl/rockchip.h"
+/include/ "dt-bindings/interrupt-controller/irq.h"
+
+/{
+    model = "This is my devicetree!";
+
+
+    ft5x06@38{
+        compatible="edt,edt-ft5206";
+        interrupt-parent=<&gpio0>;
+        interrupts=<RK_PB5 IRQ_TYPE_EDGE_RISING>;
+    };
+    
+};
