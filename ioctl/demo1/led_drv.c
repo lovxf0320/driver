@@ -1,0 +1,164 @@
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/fs.h>
+#include <linux/cdev.h>
+#include <linux/uaccess.h>
+#include <linux/device.h>
+#include <linux/gpio.h>
+#include <mach/platform.h>
+#include <linux/miscdevice.h>
+#include <linux/ioctl.h>
+
+#define LED_MAGIC        'L'
+/*_IOWR(type, number, data_type)
+
+| 字段        | 说明                                                    |
+| ----------- | ------------------------------------------------------- |
+| `type`      | 一个字符，标识设备类型（这里是 `'L'` 表示 led）         |
+| `number`    | 命令编号（每个命令唯一）                                |
+| `data_type` | 传输的数据结构类型（会自动计算大小）                    |
+| `_IOWR`     | 表示这是 **双向传输**，用户空间与内核空间都要访问数据   |
+*/
+#define CMD_LED_ON             _IOW(LED_MAGIC,0,unsigned long)
+#define CMD_LED_OFF            _IOW(LED_MAGIC,1,unsigned long)
+/*
+| 字段  | 含义                        |
+| ----- | --------------------------- |
+| `'L'` | 类型标识，表示 LED 驱动类   |
+| `3`   | 命令编号，第 4 个命令       |
+| `_IO` | 表示无参数传输              |
+*/
+#define CMD_LED_ALL_ON         _IO(LED_MAGIC,2)
+#define CMD_LED_ALL_OFF        _IO(LED_MAGIC,3)
+//这是一个 多字符字符常量，C语言中 'A' 是合法的字符（char），
+//但 'ABC' 是非法的；
+//'LED_MAGIC' 被当成“超长字符常量”，其类型是 int，
+//不是一个合法的 char 字面量。
+
+static struct gpio leds_gpios[] = {
+	{ PAD_GPIO_E+13, GPIOF_OUT_INIT_HIGH, "D7 LED" }, /* default to OFF */
+	{ PAD_GPIO_C+17, GPIOF_OUT_INIT_HIGH, "D8 LED" }, /* default to OFF */
+	{ PAD_GPIO_C+8,  GPIOF_OUT_INIT_HIGH, "D9 LED" }, /* default to OFF */	
+	{ PAD_GPIO_C+7,  GPIOF_OUT_INIT_HIGH, "D10 LED" }, /* default to OFF */	
+};
+
+int myled_open (struct inode * inode, struct file * file){
+	printk(KERN_INFO"myled_open\n");
+	return 0;
+}
+
+int myled_release (struct inode *inode, struct file *file){
+	printk(KERN_INFO"myled_release\n");
+	return 0;
+}
+/*
+| 参数名 | 类型            | 作用说明                                                                |
+| ------ | --------------- | ----------------------------------------------------------------------- |
+| `file` | `struct file *` | 内核中的“打开文件”对象，记录设备状态（例如是否为 O\_NONBLOCK 模式）     |
+| `cmd`  | `unsigned int`  | 命令码（由 `_IO`/`_IOW` 等宏构造），告诉驱动你要干什么，比如 LED\_ON    |
+| `arg`  | `unsigned long` | 附带参数，可以是用户传过来的值、结构体地址等                            |
+*/
+//long (*unlocked_ioctl) (struct file *, unsigned int, unsigned long);
+long myled_unlocked_ioctl (struct file *file, unsigned int cmd, unsigned long args){
+	int i;
+	int rt;
+	int n=args-7;
+	
+	if(_IOC_TYPE(cmd)!=LED_MAGIC){
+		return -ENOIOCTLCMD;
+	}
+	
+	switch(cmd){
+		case CMD_LED_ON:{
+			gpio_set_value(leds_gpios[n].gpio,0);
+		}break;
+		case CMD_LED_OFF:{
+			gpio_set_value(leds_gpios[n].gpio,1);
+		}break;
+		case CMD_LED_ALL_ON:{
+			for(i=0;i<ARRAY_SIZE(leds_gpios);i++){
+				gpio_set_value(leds_gpios[i].gpio,0);
+			}
+		}break;
+		case CMD_LED_ALL_OFF:{
+			for(i=0;i<ARRAY_SIZE(leds_gpios);i++){
+				gpio_set_value(leds_gpios[i].gpio,1);
+			}
+		}break;
+		
+		default:
+			return -ENOIOCTLCMD;
+	}
+	return rt;
+}
+
+static struct file_operations myled_fops={
+	.owner = THIS_MODULE,
+	.open = myled_open,
+	.release = myled_release,
+	.unlocked_ioctl = myled_unlocked_ioctl,
+};
+
+static struct miscdevice myled_misc={
+	.minor=MISC_DYNAMIC_MINOR,
+	.name="myled",
+	.fops=&myled_fops,
+};
+
+static int __init myled_init(void)
+{
+	int rt;
+	//使用混杂设备就可以放弃定义struct cdev、申请设备号（register_chrdev_region\alloc_chrdev_region）
+	//、初始化cdev（cdev_init）、将cdev加入到内核（cdev_add）、
+	//自动创建设备号（class_create、device_create）
+	
+	/*1.混杂设备的注册 */
+	rt = misc_register(&myled_misc);
+	if(rt < 0)
+	{
+		printk(KERN_ERR"misc_register fail\n");
+
+		goto err_misc_register;			
+		
+	}	
+	
+	/*2.批量申请gpio引脚 */
+	gpio_free_array(leds_gpios,ARRAY_SIZE(leds_gpios));
+	//因为内核已经申请了这些引脚，所以释放之后，才能调用gpio_request_array函数
+	rt = gpio_request_array(leds_gpios,ARRAY_SIZE(leds_gpios));
+	if(rt < 0)
+	{
+		printk(KERN_ERR"gpio_request_array fail\n");
+
+		goto err_gpio_request_array;			
+		
+	}
+
+	printk(KERN_INFO"myled_init\n");
+	return 0;
+
+err_gpio_request_array:
+	misc_deregister(&myled_misc);	
+err_misc_register:
+	return rt;
+}
+
+static void __exit myled_exit(void)
+{
+	/* 注销混杂设备 */
+	misc_deregister(&myled_misc);
+	
+	/* 释放gpio引脚 */
+	gpio_free_array(leds_gpios,ARRAY_SIZE(leds_gpios));
+	
+	
+	printk(KERN_INFO"myled_exit\n");	
+	
+}
+
+module_init(myled_init);//驱动的入口，使用insmod命令加载该驱动
+module_exit(myled_exit);//驱动的出口，使用rmmod命令卸载该驱动
+
+MODULE_AUTHOR("li xiaofan");
+MODULE_DESCRIPTION("This is led driver");
+MODULE_LICENSE("GPL");

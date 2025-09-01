@@ -1,0 +1,11 @@
+/dts-v1/;           //第一行表明文件的版本类型，这是一个dts-v1版本的
+/plugin/;           //表明这是一个插入文件/覆盖文件
+
+/{
+        &pwm0 {
+        compatible = "some,pwm-controller";
+        #pwm-cells = <2>;  // 需要的两个参数：周期和占空比
+        status = "okay";
+    };
+
+};
